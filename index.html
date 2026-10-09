@@ -1,0 +1,920 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Toward a foundation model for forest point clouds</title>
+        <link rel="icon" href="favicon_green_trim.svg">
+        <link rel="stylesheet" href="fonts/avenir-next/stylesheet.css">
+        <link rel="stylesheet" href="css/window.css">
+        <link rel="stylesheet" href="css/carousel.css">
+        <link rel="stylesheet" href="css/main.css">
+        <script src="js/window.js"></script>
+        <script src="js/carousel.js"></script>
+        <script src="js/pca_gallery.js"></script>
+        <script src="js/section-nav.js"></script>
+		<script src="js/main.js"></script>
+        <script src="js/charts.js"></script>
+        <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+        <link rel="stylesheet" href="vendor/katex/katex.min.css">
+        <script src="vendor/katex/katex.min.js"></script>
+        <style>
+            .katex { font-size: 1.05em; }
+            .katex-display { margin: 0; }
+            .author-link {
+                color: inherit;
+                text-decoration: none;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+                transition: border-color 0.2s ease, color 0.2s ease;
+            }
+            .author-link:hover {
+                color: #ffffff;
+                border-bottom-color: #ffffff;
+            }
+        </style>
+        <script>
+            function showFeature(index, colorName) {
+                // 1. Remove active class from all tabs
+                const tabs = document.querySelectorAll('.feature-tab');
+                tabs.forEach(tab => {
+                    // Remove color-specific classes
+                    tab.classList.remove('active-yellow', 'active-red', 'active-blue', 'active-purple', 'active-green', 'active-magenta');
+                });
+                // 2. Hide all content panels
+                const panels = document.querySelectorAll('.feature-panel');
+                panels.forEach(panel => panel.classList.remove('active'));
+                // 3. Add specific active class to clicked tab
+                tabs[index].classList.add('active-' + colorName);
+                // 4. Show the selected panel
+                panels[index].classList.add('active');
+                // 5. Lazily render any charts inside it (needs layout to exist)
+                if (window.initChartsIn) { window.initChartsIn(panels[index]); }
+            }
+
+            function scrollToVideo() {
+                window.scrollTo({
+                    top: 0.8 * window.innerHeight,
+                    behavior: 'smooth'
+                });
+            }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                if (window.katex) {
+                    const equations = {
+                        'eq-l2g': 'L_{l2g} = \\sum H\\big(P_t^l,\\, P_s^l\\big)',
+                        'eq-m2g': 'L_{m2g} = \\sum H\\big(P_t^m,\\, P_s^m\\big)'
+                    };
+                    Object.keys(equations).forEach(function(id) {
+                        const el = document.getElementById(id);
+                        if (el) {
+                            try {
+                                katex.render(equations[id], el, { throwOnError: false, displayMode: true });
+                            } catch (e) {
+                                // leave the static fallback markup already in the element
+                            }
+                        }
+                    });
+                }
+
+                const indicator = document.getElementById('scroll-indicator');
+
+                function checkScroll() {
+                    if (window.scrollY > 20) {
+                        indicator.classList.add('hidden');
+                    } else {
+                        indicator.classList.remove('hidden');
+                    }
+                }
+
+                window.addEventListener('scroll', checkScroll);
+                
+                checkScroll();
+
+                indicator.addEventListener('click', scrollToVideo);
+
+                // Charts outside the tabbed feature panels are always visible,
+                // so render them immediately rather than waiting on a tab click.
+                if (window.initChartsIn) {
+                    window.initChartsIn(document.getElementById('supervised-transfer-section'));
+                }
+                if (window.renderSharedLegend) {
+                    window.renderSharedLegend('xfer', document.getElementById('xfer-shared-legend'), [
+                        { key: 'ssl', label: 'SSL pretrain', color: '#4878CF', shape: 'circle' },
+                        { key: 'sem', label: 'Sem. Seg. pretrain', color: '#6ACC65', shape: 'square' },
+                        { key: 'ins', label: 'Inst. Seg. pretrain', color: '#D65F5F', shape: 'diamond' },
+                        { key: 'species', label: 'Species Cls. pretrain', color: '#B47CC7', shape: 'triangle' },
+                        { key: 'age', label: 'Age Reg. pretrain', color: '#C4AD66', shape: 'triangle-down' }
+                    ]);
+                }
+            });
+        </script>
+    </head>
+    <body>
+        <nav id="section-nav" class="section-nav"></nav>
+        <div id="teaser" style="width: 100%; min-height: 80vh; position: relative; overflow: hidden; display: flex;">
+            <img src="assets/website_teaser.png" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0;">
+            <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); z-index: 1;"></div>
+            <div style="position: relative; z-index: 2; flex: 1 1 auto; margin: 0 12%; padding: 40px 0 14vh; display: flex; flex-direction: column; align-items: start; color: white;">
+                <div id="logos" style="display: flex; flex-wrap: wrap; align-items: center; gap: 28px 28px;">
+                    <img src="assets/logo/eth-logo-neg.svg" alt="ETH Zurich" style="height: 28px; width: auto;">
+                    <img src="assets/logo/oxford_logo_nobg_trim.svg" alt="University of Oxford" style="height: 50px; width: auto;">
+                    <img src="assets/logo/nibio-logo-neg.png" alt="NIBIO" style="height: 42px; width: auto;">
+                    <img src="assets/logo/UZH_Logo_white.svg" alt="University of Zurich" style="height: 42px; width: auto;">
+                </div>
+                <div style="flex: 1 1 auto; min-height: 32px;"></div>
+                <div style="display: flex; flex-direction: column; align-items: start; max-width: 100%;">
+                    <div style="font-size: clamp(26px, 4vw, 46px); font-weight: 300; line-height: 1.15;">
+                       Toward a foundation model for forest point clouds
+                    </div>
+                    <div id="authors" style="font-size: clamp(15px, 1.6vw, 20px); font-weight: 200; margin-top: 16px; line-height: 1.6; max-width: min(700px, 100%);">
+                        <span style="white-space: nowrap;"><a href="https://ywyue.github.io/" target="_blank" class="author-link">Yuanwen Yue</a><sup>1,2</sup>,</span>
+                        <span style="white-space: nowrap;"><a href="https://scholar.google.com/citations?user=mrysxWoAAAAJ" target="_blank" class="author-link">Stefano Puliti</a><sup>3,&dagger;</sup>,</span>
+                        <span style="white-space: nowrap;"><a href="https://drprojects.github.io/" target="_blank" class="author-link">Damien Robert</a><sup>4,&dagger;</sup>,</span>
+                        <span style="white-space: nowrap;"><a href="https://atakan-topaloglu.github.io/" target="_blank" class="author-link">Atakan Topaloğlu</a><sup>1</sup>,</span>
+                        <span style="white-space: nowrap;"><a href="https://scholar.google.com/citations?user=12YyiiIAAAAJ" target="_blank" class="author-link">Binbin Xiang</a><sup>3</sup>,</span>
+                        <span style="white-space: nowrap;"><a href="https://scholar.google.com/citations?user=j563WT8AAAAJ" target="_blank" class="author-link">Maciej Wielgosz</a><sup>3</sup>,</span>
+                        <span style="white-space: nowrap;"><a href="https://scholar.google.com/citations?user=sxLG1rgAAAAJ&hl=en" target="_blank" class="author-link">Jan Dirk Wegner</a><sup>4</sup>,</span>
+                        <span style="white-space: nowrap;"><a href="https://scholar.google.com/citations?user=8agrzhcAAAAJ" target="_blank" class="author-link">Rasmus Astrup</a><sup>3</sup>,</span>
+                        <span style="white-space: nowrap;"><a href="https://chrirupp.github.io/" target="_blank" class="author-link">Christian Rupprecht</a><sup>2</sup>,</span>
+                        <span style="white-space: nowrap;"><a href="https://scholar.google.com/citations?user=FZuNgqIAAAAJ&hl=en" target="_blank" class="author-link">Konrad Schindler</a><sup>1</sup></span>
+                    </div>
+                    <div id="affiliations" style="font-size: clamp(13px, 1.2vw, 16px); font-weight: 100; margin-top: 8px; color: #ffffffcf; max-width: min(700px, 100%); line-height: 1.6;">
+                        <sup>1</sup>ETH Zurich &nbsp;&nbsp; <sup>2</sup>University of Oxford &nbsp;&nbsp; <sup>3</sup>Norwegian Institute of Bioeconomy Research (NIBIO) &nbsp;&nbsp; <sup>4</sup>University of Zurich
+                    </div>
+                    <div id="equal-contrib" style="font-size: 14px; font-weight: 100; margin-top: 6px; color: #ffffffcf;">
+                        <sup>&dagger;</sup>Equal contribution
+                    </div>
+                    <div id="links" style="margin-top: 24px;">
+                        <div><a id="paper" href="https://arxiv.org/abs/2609.24787">Paper</a></div>
+                        <div><a id="code" href="https://github.com/prs-eth/ForPT">Code</a></div>
+                        <div><a id="models" href="https://huggingface.co/prs-eth/ForPT">Models</a></div>
+                        <!-- <div><a id="demo" href="https://huggingface.co/spaces/prs-eth/ForPT">Demo</a></div> -->
+                        <!-- <div><a id="data" href="#">Data</a></div> -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div style="display: flex; justify-content: center; padding: 56px 24px;">
+            <div style="max-width: 820px; width: 100%; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px 36px;">
+                <div style="margin-bottom: 24px;">
+                    <div style="font-size: 15px; font-weight: 600; letter-spacing: 2px; color: #ffffff5f;">Highlights</div>
+                </div>
+                <div style="display: flex; flex-direction: column;">
+                    <div style="display: flex; gap: 14px; align-items: flex-start; padding: 12px 0;">
+                        <svg style="flex: none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c4c4c4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6"></path><path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"></path></svg>
+                        <div style="font-size: 17px; font-weight: 200; color: #ffffff9f;">Curated a <span style="color: #ffffff; font-weight: 500;">large-scale unlabelled forest LiDAR corpus</span> for representation learning.</div>
+                    </div>
+                    <div style="display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-top: 1px solid rgba(255,255,255,0.08);">
+                        <svg style="flex: none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2dd4bf" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"></circle><path d="M8.5 13.5L7 22l5-3 5 3-1.5-8.5"></path></svg>
+                        <div style="font-size: 17px; font-weight: 200; color: #ffffff9f;">Supervised <span style="color: #ffffff; font-weight: 500;">LitePT</span> sets a <span style="color: #ffffff; font-weight: 500;">new state of the art</span> on forest point cloud benchmarks.</div>
+                    </div>
+                    <div style="display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-top: 1px solid rgba(255,255,255,0.08);">
+                        <svg style="flex: none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a476be" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41L13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><circle cx="7" cy="7" r="0.5" fill="#a476be"></circle></svg>
+                        <div style="font-size: 17px; font-weight: 200; color: #ffffff9f;">Self-supervised representations <span style="color: #ffffff; font-weight: 500;">excel over scratch training</span> in low-label regimes.</div>
+                    </div>
+                    <div style="display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-top: 1px solid rgba(255,255,255,0.08);">
+                        <svg style="flex: none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a476be" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+                        <div style="font-size: 17px; font-weight: 200; color: #ffffff9f;">Self-supervised pretraining transfers <span style="color: #ffffff; font-weight: 500;">more consistently</span> than supervised pretraining.</div>
+                    </div>
+                    <div style="display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-top: 1px solid rgba(255,255,255,0.08);">
+                        <svg style="flex: none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a476be" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                        <div style="font-size: 17px; font-weight: 200; color: #ffffff9f;">Self-distillation captures <span style="color: #ffffff; font-weight: 500;">forest semantics</span> but not <span style="color: #ffffff; font-weight: 500;">instance-level structure</span>.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="main">
+
+
+            <div class="x-section-title">Methodology</div>
+
+            <!-- 1. Overview -->
+            <div style="margin-bottom: 40px; margin: 0 16px;">
+                <p style="font-size: 18px; margin-top: 24px; margin-left: auto; margin-right: auto;">
+                    We investigate two pretraining strategies for a common <span style="color: #ffffff; font-weight: 500;">LitePT</span> backbone &mdash; <span style="color: #a476be; font-weight: 600;">self-supervised</span> and <span style="color: #2dd4bf; font-weight: 600;">supervised</span> &mdash; and transfer each to downstream forestry tasks via frozen features or fine-tuning, compared against training from scratch. This unified protocol enables a systematic comparison of representation learning strategies under identical transfer conditions and annotation budgets.
+                </p>
+            </div>
+
+            <!-- 2. Self-Supervised Pretraining (Section) -->
+            <div style="display: flex; align-items: baseline; gap: 14px; margin: 64px 16px 20px;">
+                <div style="font-size: 34px; font-weight: 700; color: rgba(167, 139, 250, 0.35); line-height: 1;">A</div>
+                <div style="font-size: 22px; font-weight: 600; color: #a476be; letter-spacing: 1px;">Self-Supervised Pretraining</div>
+                <div style="flex: 1 1 auto; height: 1px; background: rgba(167, 139, 250, 0.25);"></div>
+            </div>
+            <div style="background: rgba(167, 139, 250, 0.06); border-left: 4px solid #a476be; border-radius: 16px; padding: 24px; margin: 0 16px;">
+
+                <div style="margin-top: 0; margin-bottom: 20px; font-size: 24px; color: #ffffff;">
+                    Overall Workflow
+                </div>
+
+                <div style="display: flex; flex-wrap: wrap-reverse; align-items: stretch; gap: 32px;">
+                    <!-- Left: Image -->
+                    <div style="flex: 3 1 520px; display: flex; justify-content: center; align-items: center;">
+                        <img src="assets/method/ssl_workflow_transparent.png" alt="Self-Supervised Pretraining Workflow" style="width: 100%; max-width: 640px; height: auto; display: block;">
+                    </div>
+
+                    <!-- Right: Text, blocks sized/aligned to match the three panels in the figure (split at the two connecting arrows, at ~27% and ~61% of the figure's height) -->
+                    <div style="flex: 2 1 260px; font-size: 15px; display: flex; flex-direction: column;">
+                        <div style="flex: 27 1 0; display: flex; flex-direction: column; justify-content: center; padding-bottom: 16px; border-bottom: 1px solid rgba(167, 139, 250, 0.3); box-sizing: border-box;">
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div style="background-color: #1f1f1f; border-radius: 8px; padding: 8px 14px; text-align: center;">
+                                    <div style="font-size: 20px; font-weight: 700; color: #a476be; line-height: 1; font-variant-numeric: tabular-nums;">&asymp;160 km<sup style="font-size: 11px;">2</sup></div>
+                                    <div style="font-size: 12px; color: #d3d3d3; margin-top: 3px; letter-spacing: 0.5px;">Forest Area</div>
+                                </div>
+                                <div style="background-color: #1f1f1f; border-radius: 8px; padding: 8px 14px; text-align: center;">
+                                    <div style="font-size: 20px; font-weight: 700; color: #a476be; line-height: 1; font-variant-numeric: tabular-nums;">&asymp;33B</div>
+                                    <div style="font-size: 12px; color: #d3d3d3; margin-top: 3px; letter-spacing: 0.5px;">LiDAR Points</div>
+                                </div>
+                            </div>
+                            <div style="color: #d4d4d8;">An unlabeled pretraining corpus (&asymp;15,900 ha) collected without any annotations.</div>
+                        </div>
+                        <div style="flex: 32 1 0; display: flex; flex-direction: column; justify-content: center; padding: 16px 0; border-bottom: 1px solid rgba(167, 139, 250, 0.3); box-sizing: border-box;">
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div style="background-color: #1f1f1f; border-radius: 8px; padding: 8px 14px; text-align: center;">
+                                    <div style="font-size: 20px; font-weight: 700; color: #a476be; line-height: 1;">EMA</div>
+                                    <div style="font-size: 12px; color: #d3d3d3; margin-top: 3px; letter-spacing: 0.5px;">Momentum Teacher</div>
+                                </div>
+                            </div>
+                            <div style="color: #d4d4d8;">The student learns to match the teacher's representations &mdash; no labels required.</div>
+                        </div>
+                        <div style="flex: 41 1 0; display: flex; flex-direction: column; justify-content: center; padding-top: 16px; box-sizing: border-box;">
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div style="background-color: #1f1f1f; border-radius: 8px; padding: 8px 14px; text-align: center;">
+                                    <div style="font-size: 20px; font-weight: 700; color: #a476be; line-height: 1; font-variant-numeric: tabular-nums;">4</div>
+                                    <div style="font-size: 12px; color: #d3d3d3; margin-top: 3px; letter-spacing: 0.5px;">Downstream Tasks</div>
+                                </div>
+                            </div>
+                            <div style="color: #d4d4d8;">The pretrained backbone is transferred to each downstream forestry task via frozen feature transfer or end-to-end fine-tuning.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Methodology figure -->
+                <div style="margin-top: 32px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 32px;">
+                    <div style="font-size: 20px; color: #ffffff; margin-bottom: 12px;">
+                        Self-Distillation Pipeline
+                    </div>
+                    <p style="color: #d4d4d8; font-size: 15px; line-height: 1.6; max-width: 820px;">
+                        The student encodes masked, partial views of a forest point cloud; the teacher encodes the same scene in full. Two prediction heads align the student's representations with the momentum-updated teacher's &mdash; with no labels and no negative pairs.
+                    </p>
+
+                    <img src="assets/method/ssl_pipeline_v2_transparent.png" alt="Self-Supervised Pretraining Methodology" style="width: 100%; max-width: 700px; height: auto; display: block; margin: 24px auto;">
+
+                    <!-- Self-distillation loss: the two branches behind the student's two heads -->
+                    <div style="font-size: 16px; color: #ffffff; font-weight: 600; margin-bottom: 12px; max-width: 820px; margin-left: auto; margin-right: auto;">
+                        Self-Distillation Loss
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 16px; max-width: 820px; margin: 0 auto;">
+                        <!-- Local-to-Global branch -->
+                        <div style="flex: 1 1 320px; background-color: #1f1f1f; border-radius: 10px; padding: 20px;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                                <div style="width: 14px; height: 14px; border-radius: 3px; background-color: #60a5fa; flex: none;"></div>
+                                <div style="color: #7f7f7f; font-size: 12px;">&rarr;</div>
+                                <div style="width: 14px; height: 14px; border-radius: 3px; background-color: #eec88e; flex: none;"></div>
+                                <div style="color: #ffffff; font-size: 14px;">Local-to-global Distillation</div>
+                            </div>
+                            <div style="color: #d4d4d8; font-size: 13px; line-height: 1.6; margin-bottom: 14px;">
+                                The teacher encodes a <span style="color: #eec88e;">global view</span> and its local-global head predicts target <i>P<sub>t</sub><sup>l</sup></i>; the student encodes a <span style="color: #60a5fa;">local view</span> and predicts <i>P<sub>s</sub><sup>l</sup></i> with the same head.
+                            </div>
+                            <div id="eq-l2g" style="background-color: #141414; border-radius: 6px; padding: 12px 14px; text-align: center; color: #e5e5e5; min-height: 20px;">
+                                <i>L<sub>l2g</sub></i> = &Sigma; <i>H</i>(<i>P<sub>t</sub><sup>l</sup></i>, <i>P<sub>s</sub><sup>l</sup></i>)
+                            </div>
+                        </div>
+
+                        <!-- Masked-to-Global branch -->
+                        <div style="flex: 1 1 320px; background-color: #1f1f1f; border-radius: 10px; padding: 20px;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                                <div style="width: 14px; height: 14px; border-radius: 3px; background-image: repeating-linear-gradient(45deg, #60a5fa 0 2px, transparent 2px 5px); border: 1px solid #60a5fa; flex: none;"></div>
+                                <div style="color: #7f7f7f; font-size: 12px;">&rarr;</div>
+                                <div style="width: 14px; height: 14px; border-radius: 3px; background-image: repeating-linear-gradient(45deg, #eec88e 0 2px, transparent 2px 5px); border: 1px solid #eec88e; flex: none;"></div>
+                                <div style="color: #ffffff; font-size: 14px;">Masked-to-global Distillation</div>
+                            </div>
+                            <div style="color: #d4d4d8; font-size: 13px; line-height: 1.6; margin-bottom: 14px;">
+                                The teacher encodes the <span style="color: #eec88e;">unmasked global view</span> and its mask-global head predicts <i>P<sub>t</sub><sup>m</sup></i>; the student encodes the corresponding <span style="color: #60a5fa;">masked global view</span> and predicts <i>P<sub>s</sub><sup>m</sup></i>.
+                            </div>
+                            <div id="eq-m2g" style="background-color: #141414; border-radius: 6px; padding: 12px 14px; text-align: center; color: #e5e5e5; min-height: 20px;">
+                                <i>L<sub>m2g</sub></i> = &Sigma; <i>H</i>(<i>P<sub>t</sub><sup>m</sup></i>, <i>P<sub>s</sub><sup>m</sup></i>)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Supervised Pretraining (Section) -->
+            <div style="display: flex; align-items: baseline; gap: 14px; margin: 64px 16px 20px;">
+                <div style="font-size: 34px; font-weight: 700; color: rgba(45, 212, 191, 0.35); line-height: 1;">B</div>
+                <div style="font-size: 22px; font-weight: 600; color: #2dd4bf; letter-spacing: 1px;">Supervised Pretraining</div>
+                <div style="flex: 1 1 auto; height: 1px; background: rgba(45, 212, 191, 0.25);"></div>
+            </div>
+            <div style="background: rgba(45, 212, 191, 0.06); border-left: 4px solid #2dd4bf; border-radius: 16px; padding: 24px; margin: 0 16px;">
+
+                <div style="margin-top: 0; margin-bottom: 20px; font-size: 24px; color: #ffffff;">
+                    Overall Workflow
+                </div>
+
+                <div style="display: flex; flex-wrap: wrap; align-items: stretch; gap: 32px;">
+                    <!-- Left: Text, blocks sized/aligned to match the two panels in the figure (split at the connecting arrow, at ~43% of the figure's height) -->
+                    <div style="flex: 2 1 260px; font-size: 15px; display: flex; flex-direction: column;">
+                        <div style="flex: 51 1 0; display: flex; flex-direction: column; justify-content: center; padding-bottom: 16px; border-bottom: 1px solid rgba(45, 212, 191, 0.3); box-sizing: border-box;">
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div style="background-color: #1f1f1f; border-radius: 8px; padding: 8px 14px; text-align: center;">
+                                    <div style="font-size: 20px; font-weight: 700; color: #2dd4bf; line-height: 1; font-variant-numeric: tabular-nums;">1</div>
+                                    <div style="font-size: 12px; color: #d3d3d3; margin-top: 3px; letter-spacing: 0.5px;">Source Task at a Time</div>
+                                </div>
+                            </div>
+                            <div style="color: #d4d4d8;">The backbone is pretrained with full supervision on one forestry task (species classification shown) &mdash; repeated independently for each of the four tasks.</div>
+                        </div>
+                        <div style="flex: 49 1 0; display: flex; flex-direction: column; justify-content: center; padding-top: 16px; box-sizing: border-box;">
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div style="background-color: #1f1f1f; border-radius: 8px; padding: 8px 14px; text-align: center;">
+                                    <div style="font-size: 20px; font-weight: 700; color: #2dd4bf; line-height: 1; font-variant-numeric: tabular-nums;">3</div>
+                                    <div style="font-size: 12px; color: #d3d3d3; margin-top: 3px; letter-spacing: 0.5px;">Remaining Tasks for Transfer</div>
+                                </div>
+                            </div>
+                            <div style="color: #d4d4d8;">Each resulting encoder is transferred to the remaining tasks, excluding its own source task from evaluation.</div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Image -->
+                    <div style="flex: 4 1 560px; display: flex; justify-content: center; align-items: center;">
+                        <img src="assets/method/supervised_pretraining_workflow_transparent.png" alt="Supervised Pretraining Workflow" style="width: 100%; max-width: 780px; height: auto; display: block;">
+                    </div>
+                </div>
+            </div>
+
+
+
+
+            <div class="x-section-title">Evaluating self-supervised pretraining</div>
+
+            <div class="feature-container">
+
+                <div class="x-small-header" style="margin-top: 24px;">Learned Representations</div>
+                <p style="color: #d4d4d8; font-size: 15px; line-height: 1.6; text-align: center; max-width: 720px; margin: 0 auto 8px;">
+                    Per-point features from our frozen self-supervised backbone, projected to RGB via the top-3
+                    principal components (PCA).
+                </p>
+                <div id="results-pca"></div>
+
+                <div class="x-small-header">Downstream Tasks</div>
+
+                <!-- 1. Navigation Icons (Row of 4 Squares) -->
+                <div class="feature-tabs">
+                    <!-- Tab 1: Yellow -->
+                    <div class="feature-tab" onclick="showFeature(0, 'yellow')">
+                        <img src="assets/icons/sem_seg.svg" alt="Semantic Segmentation">
+                        <span>Semantic Segmentation</span>
+                    </div>
+
+                    <!-- Tab 2: Red -->
+                    <div class="feature-tab" onclick="showFeature(1, 'red')">
+                        <img src="assets/icons/ins_seg.svg" alt="Instance Segmentation">
+                        <span>Instance Segmentation</span>
+                    </div>
+
+                    <!-- Tab 3: Blue -->
+                    <div class="feature-tab" onclick="showFeature(2, 'green')">
+                        <img src="assets/icons/species_cls.svg" alt="Species Classification">
+                        <span>Species Classification</span>
+                    </div>
+
+                    <!-- Tab 4: Purple -->
+                    <div class="feature-tab" onclick="showFeature(3, 'magenta')">
+                        <img src="assets/icons/age_regress.svg" alt="Age Regression">
+                        <span>Age regression</span>
+                    </div>
+                </div>
+
+                <!-- 2. Content Display Area -->
+                <div class="feature-content-wrapper">
+                    
+                    <!-- Content 1: Semantic Segmentation -->
+                    <div class="feature-panel">
+                        <div style="font-size: 24px; font-weight: 700; color: #facd5c; margin-bottom: 16px;">
+                            State-of-the-art semantic segmentation
+                        </div>
+                        <p style="color: #d4d4d8; font-size: 15px; line-height: 1.6;">
+                            We evaluate 3-class point-wise segmentation (ground / wood / leaf) on held-out forest plots,
+                            comparing a training-free <em>k</em>NN probe against linear probing, decoder probing, training
+                            from scratch, and full fine-tuning of the pretrained backbone.
+                        </p>
+
+                        <div class="viz-card" style="margin: 20px auto 0; max-width: 600px;">
+                            <div class="viz-card-title" style="color: #facd5c;">Data efficiency</div>
+                            <div class="viz-card-subtitle">
+                                <span style="font-weight: 700;">kNN alone scores decently with zero training</span>;
+                                fine-tuning beats scratch throughout, and pretraining's edge is largest when labels are scarce.
+                            </div>
+                            <div class="viz-chart" data-chart-id="sem-data-efficiency"></div>
+                        </div>
+
+                        <div class="viz-card" style="margin: 20px auto 0; max-width: 600px;">
+                            <div class="viz-card-title" style="color: #facd5c;">Training dynamics</div>
+                            <div class="viz-card-subtitle">
+                                Pretraining accelerates convergence &mdash;
+                                <span style="font-weight: 700;">fine-tuning for just 10 epochs already beats scratch trained for the full 100</span>.
+                            </div>
+                            <div class="viz-chart" data-chart-id="sem-val-curve"></div>
+                        </div>
+
+                        <div class="viz-card" style="margin: 20px auto 0; max-width: 600px;">
+                            <div class="viz-card-title" style="color: #facd5c;">Qualitative comparison</div>
+                            <div class="viz-card-subtitle">
+                                Even the <span style="font-weight: 700;">training-free kNN probe</span>
+                                (leftmost column) produces decent segmentations that closely track ground truth across
+                                all three held-out plots &mdash;
+                                <span style="font-weight: 700;">NIBIO</span>,
+                                <span style="font-weight: 700;">NIBIO_MLS</span>,
+                                <span style="font-weight: 700;">BlueCat</span>.
+                            </div>
+                            <div style="border-radius: 8px; overflow: hidden;">
+                                <img src="assets/sem/sem_seg_transparent.png" alt="Semantic segmentation qualitative comparison" style="width: 100%; height: auto; display: block;">
+                            </div>
+                            <div class="results-table-footnote">
+                                Qualitative forest semantic segmentation results on FOR-instanceV2 test set samples
+                                when 0.81 ha labelled training data is used.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Content 2: Instance Segmentation -->
+                    <div class="feature-panel">
+                        <div style="font-size: 24px; font-weight: 700; color: #d17969; margin-bottom: 16px;">
+                            State-of-the-art instance segmentation
+                        </div>
+                        <p style="color: #d4d4d8; font-size: 15px; line-height: 1.6;">
+                            We evaluate individual-tree instance segmentation and its auxiliary semantic segmentation
+                            on the FOR-instanceV2 benchmark.
+                        </p>
+
+                        <div class="viz-card" style="margin: 20px auto 0; max-width: 600px;">
+                            <div class="viz-card-title" style="color: #d17969;">Benchmark comparison</div>
+                            <div class="viz-card-subtitle">
+                                On the full training set, <span style="font-weight: 700;">LitePT-<em>scratch</em></span>
+                                slightly outperforms <span style="font-weight: 700;">ForPT-<em>finetune</em></span>,
+                                while both variants surpass the previous best results in F1 score for individual tree
+                                segmentation and mIoU for semantic segmentation.
+                            </div>
+                            <div class="results-table-wrap">
+                                <table class="results-table">
+                                    <thead>
+                                        <tr>
+                                            <th></th>
+                                            <th colspan="5">Individual tree seg.</th>
+                                            <th colspan="4" class="col-group-border">Semantic seg.</th>
+                                        </tr>
+                                        <tr>
+                                            <th>Method</th>
+                                            <th>mAP &uarr;</th>
+                                            <th>mAP25 &uarr;</th>
+                                            <th>mAP50 &uarr;</th>
+                                            <th>F1 &uarr;</th>
+                                            <th>Cov &uarr;</th>
+                                            <th class="col-group-border">Ground &uarr;</th>
+                                            <th>Wood &uarr;</th>
+                                            <th>Leaf &uarr;</th>
+                                            <th>mIoU &uarr;</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td class="method-name">ForAINetV2_R8</td>
+                                            <td>34.5</td><td>65.1</td><td>55.2</td><td>72.4</td><td>73.3</td>
+                                            <td class="col-group-border">98.3</td><td>68.1</td><td>94.3</td><td>86.9</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">ForAINetV2_R16</td>
+                                            <td>37.3</td><td>63.8</td><td>54.8</td><td>70.8</td><td>72.7</td>
+                                            <td class="col-group-border">98.8</td><td>69.2</td><td>94.5</td><td>87.5</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">TreeLearn</td>
+                                            <td>19.6</td><td>41.4</td><td>30.9</td><td>50.3</td><td>52.5</td>
+                                            <td class="col-group-border">&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">OneFormer3D</td>
+                                            <td>48.7</td><td>71.8</td><td>65.7</td><td>73.1</td><td>80.0</td>
+                                            <td class="col-group-border">97.8</td><td>63.1</td><td>93.4</td><td>84.8</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">ForestFormer3D</td>
+                                            <td>58.3</td><td>79.5</td><td>74.8</td><td>83.5</td><td>81.6</td>
+                                            <td class="col-group-border">98.6</td><td>65.5</td><td>93.9</td><td>86.0</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">ForestMamba</td>
+                                            <td>54.9</td><td>77.7</td><td>72.0</td><td>82.0</td><td>76.6</td>
+                                            <td class="col-group-border">98.5</td><td>65.4</td><td>93.9</td><td>85.9</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">SegmentAnyTreeV2</td>
+                                            <td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>83.4</td><td><strong>89.6</strong></td>
+                                            <td class="col-group-border"><strong>99.1</strong></td><td>70.5</td><td>93.9</td><td>87.8</td>
+                                        </tr>
+                                        <tr class="results-table-ours results-table-ours-first">
+                                            <td class="method-name">LitePT-<em>scratch</em> <span class="citation">(ours)</span></td>
+                                            <td><strong>61.3</strong></td><td><strong>82.0</strong></td><td><strong>78.4</strong></td><td><strong>85.5</strong></td><td>81.6</td>
+                                            <td class="col-group-border">98.4</td><td><strong>71.9</strong></td><td><strong>94.6</strong></td><td><strong>88.3</strong></td>
+                                        </tr>
+                                        <tr class="results-table-ours">
+                                            <td class="method-name">ForPT-<em>finetune</em> <span class="citation">(ours)</span></td>
+                                            <td>60.6</td><td>81.4</td><td>77.6</td><td>84.7</td><td>81.1</td>
+                                            <td class="col-group-border">98.5</td><td>71.4</td><td>94.4</td><td>88.1</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="viz-card" style="margin: 20px auto 0; max-width: 600px;">
+                            <div class="viz-card-title" style="color: #d17969;">Qualitative comparison</div>
+                            <div class="viz-card-subtitle">
+                                In the low-data regime, fine-tuning still provides a clear advantage over training 
+                                from scratch. When only 1.35 ha labelled training data is used, both training from 
+                                scratch and fine-tuning produce reasonable segmentation results, while fine-tuning 
+                                yields more accurate instance predictions, correcting under-segmented trees, 
+                                reducing incorrect instance assignments, and better preserving fine-grained details.
+                            </div>
+                            <div style="border-radius: 8px; overflow: hidden;">
+                                <img src="assets/ins/ins_seg2_transparent.png" alt="Instance segmentation qualitative comparison" style="width: 100%; height: auto; display: block;">
+                            </div>
+                            <div class="results-table-footnote">
+                                Qualitative forest instance segmentation results on FOR-instanceV2 test set samples
+                                when only 1.35 ha labelled training data is used.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Content 3: Species Classification -->
+                    <div class="feature-panel">
+                        <div style="font-size: 24px; font-weight: 700; color: #2fae3a; margin-bottom: 16px;">
+                            State-of-the-art species classification
+                        </div>
+                        <p style="color: #d4d4d8; font-size: 15px; line-height: 1.6;">
+                            We evaluate individual-tree species classification on the FOR-species20K benchmark
+                            (34 species).
+                        </p>
+
+                        <div class="viz-card" style="margin: 20px auto 0; max-width: 600px;">
+                            <div class="viz-card-title" style="color: #2fae3a;">Benchmark comparison</div>
+                            <div class="viz-card-subtitle">
+                                LitePT-<em>scratch</em> and ForPT-<em>finetune</em> outperform all previous methods on
+                                this benchmark. LitePT-<em>scratch</em> achieves an overall accuracy of
+                                <span style="font-weight: 700;">82.7%</span>, while fine-tuning the pretrained ForPT
+                                backbone further increases the accuracy to <span style="font-weight: 700;">83.2%</span>,
+                                achieving the best performance across all reported metrics.
+                            </div>
+                            <div class="results-table-wrap">
+                                <table class="results-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Method</th>
+                                            <th>Input</th>
+                                            <th>OA &uarr;</th>
+                                            <th>Precision &uarr;</th>
+                                            <th>Recall &uarr;</th>
+                                            <th>F1 &uarr;</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td class="method-name">SimpleView</td>
+                                            <td>Image</td><td>76.2</td><td>76.9</td><td>75.5</td><td>75.6</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">YOLOv5</td>
+                                            <td>Image</td><td>77.9</td><td>84.2</td><td>75.0</td><td>77.3</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">DetailView</td>
+                                            <td>Image</td><td>79.5</td><td>82.3</td><td>76.7</td><td>78.0</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">PointAugment + DGCNN</td>
+                                            <td>Point cloud</td><td>68.3</td><td>72.5</td><td>65.7</td><td>70.3</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">PointMixer</td>
+                                            <td>Point cloud</td><td>71.1</td><td>74.4</td><td>65.5</td><td>71.1</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">MinkNet</td>
+                                            <td>Point cloud</td><td>73.7</td><td>79.9</td><td>70.6</td><td>72.3</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">Ensemble PointNet++</td>
+                                            <td>Point cloud</td><td>75.6</td><td>78.2</td><td>73.5</td><td>74.9</td>
+                                        </tr>
+                                        <tr class="results-table-ours results-table-ours-first">
+                                            <td class="method-name">LitePT-<em>scratch</em> <span class="citation">(ours)</span></td>
+                                            <td>Point cloud</td><td>82.7</td><td>85.3</td><td>81.6</td><td>82.5</td>
+                                        </tr>
+                                        <tr class="results-table-ours">
+                                            <td class="method-name">ForPT-<em>linear probing</em> <span class="citation">(ours)</span></td>
+                                            <td>Point cloud</td><td>68.7</td><td>74.2</td><td>66.0</td><td>67.8</td>
+                                        </tr>
+                                        <tr class="results-table-ours">
+                                            <td class="method-name">ForPT-<em>finetune</em> <span class="citation">(ours)</span></td>
+                                            <td>Point cloud</td><td><strong>83.2</strong></td><td><strong>86.0</strong></td><td><strong>81.8</strong></td><td><strong>83.0</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="viz-card" style="margin: 20px auto 0; max-width: 600px;">
+                            <div class="viz-card-title" style="color: #2fae3a;">Training dynamics</div>
+                            <div class="viz-card-subtitle">
+                                Pretraining accelerates convergence &mdash;
+                                <span style="font-weight: 700;">fine-tuning matches scratch's full 100-epoch accuracy by epoch 54</span>,
+                                nearly twice as fast.
+                            </div>
+                            <div class="viz-chart" data-chart-id="species-val-curve"></div>
+                        </div>
+
+                        <div class="viz-card" style="margin: 20px auto 0; max-width: 600px;">
+                            <div class="viz-card-title" style="color: #2fae3a;">Long-tail robustness</div>
+                            <div class="viz-card-subtitle">
+                                Fine-tuning helps most where data is scarce &mdash;
+                                <span style="font-weight: 700;">classes with the fewest training samples see the largest accuracy gains</span>,
+                                while common species are largely unaffected, mitigating the long-tail effect.
+                            </div>
+                            <div class="viz-chart" data-chart-id="species-gain-vs-freq"></div>
+                            <div class="results-table-footnote">
+                                Per-class accuracy gain of fine-tuning over training from scratch at epoch 20.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Content 4: Age Regression -->
+                    <div class="feature-panel">
+                        <div style="font-size: 24px; font-weight: 700; color: #e83f97; margin-bottom: 16px;">
+                            State-of-the-art age regression
+                        </div>
+                        <p style="color: #d4d4d8; font-size: 15px; line-height: 1.6;">
+                            We evaluate individual-tree age regression on the FOR-age benchmark.
+                        </p>
+
+                        <div class="viz-card" style="margin: 20px auto 0; max-width: 600px;">
+                            <div class="viz-card-title" style="color: #e83f97;">Benchmark comparison</div>
+                            <div class="viz-card-subtitle">
+                                LitePT-<em>scratch</em> achieves an RMSE of <span style="font-weight: 700;">20.41
+                                years</span> and an R<sup>2</sup> of <span style="font-weight: 700;">0.74</span>,
+                                already outperforming the previously reported PTv3-<em>scratch</em> and
+                                ForestFormer3D-<em>finetune</em> results. Fine-tuning the pretrained ForPT backbone
+                                improves the performance further, reducing the RMSE to
+                                <span style="font-weight: 700;">20.03 years</span> and increasing R<sup>2</sup> to
+                                <span style="font-weight: 700;">0.75</span>, thereby achieving the best overall
+                                performance.
+                            </div>
+                            <div class="results-table-wrap">
+                                <table class="results-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Method</th>
+                                            <th>RMSE (years) &darr;</th>
+                                            <th>MD (years) &rarr; 0</th>
+                                            <th>R² &uarr;</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td class="method-name">Linear regression</td>
+                                            <td>34.15</td><td>-2.68</td><td>0.28</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">PTv3-<em>scratch</em></td>
+                                            <td>22.80</td><td>-3.96</td><td>0.68</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="method-name">ForestFormer3D-<em>finetune</em></td>
+                                            <td>20.71</td><td>2.37</td><td>0.74</td>
+                                        </tr>
+                                        <tr class="results-table-ours results-table-ours-first">
+                                            <td class="method-name">LitePT-<em>scratch</em> <span class="citation">(ours)</span></td>
+                                            <td>20.41</td><td><strong>-0.55</strong></td><td>0.74</td>
+                                        </tr>
+                                        <tr class="results-table-ours">
+                                            <td class="method-name">ForPT-<em>linear probing</em> <span class="citation">(ours)</span></td>
+                                            <td>30.65</td><td>-1.10</td><td>0.42</td>
+                                        </tr>
+                                        <tr class="results-table-ours">
+                                            <td class="method-name">ForPT-<em>finetune</em> <span class="citation">(ours)</span></td>
+                                            <td><strong>20.03</strong></td><td>1.39</td><td><strong>0.75</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="viz-card" style="margin: 20px auto 0;">
+                            <div style="max-width: 600px; margin: 0 auto;">
+                                <div class="viz-card-title" style="color: #e83f97;">Predicted vs. reference age</div>
+                                <div class="viz-card-subtitle">
+                                    We show the scatterplots of the predicted vs reference age when 625 trees (50%) are
+                                    used for training.
+                                    <span style="font-weight: 700;">Fine-tuning</span> produces predictions most closely
+                                    aligned with the 1:1 reference line, resulting in the lowest RMSE
+                                    (<span style="font-weight: 700;">21.61 years</span>) and highest R<sup>2</sup>
+                                    (<span style="font-weight: 700;">0.75</span>). Training from scratch exhibits a
+                                    larger spread around the reference line, whereas linear probing shows greater
+                                    underestimation of older trees.
+                                </div>
+                            </div>
+                            <div class="viz-chart" data-chart-id="age-pred-vs-ref"></div>
+                            <div class="results-table-footnote">
+                                Scatterplots of the predicted vs reference age on the FOR-age validation set when 625
+                                trees are used for training.
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="x-section-title">Evaluating supervised pretraining</div>
+
+            <div class="feature-container">
+                <div id="supervised-transfer-section" style="padding: 0 32px 32px;">
+                    <p style="color: #d4d4d8; font-size: 15px; line-height: 1.6;">
+                        We probe frozen representations from four task-specific supervised pretrained backbones
+                        (semantic segmentation, instance segmentation, species classification, age regression)
+                        on every <em>other</em> downstream task, and compare them against our self-supervised
+                        (SSL) pretrained backbone under the same protocol.
+                    </p>
+
+                    <div class="viz-card" style="margin: 20px auto 0;">
+                        <div class="viz-card-title" style="color: #2dd4bf;">Transfer consistency</div>
+                        <div class="viz-card-subtitle">
+                            Across all four downstream tasks, self-supervised pretraining consistently produces 
+                            the <span style="font-weight: 700;">most transferable representations</span>, 
+                            outperforming task-specific supervised pretraining under the same probing protocol.
+                        </div>
+
+                        <table class="rank-matrix">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th></th>
+                                    <th colspan="4" class="rank-matrix-xlabel">Target task&ensp;(frozen probing)</th>
+                                </tr>
+                                <tr>
+                                    <th></th>
+                                    <th></th>
+                                    <th><img src="assets/icons/sem_seg.svg" alt="" class="rank-matrix-icon">Sem. Seg.<span class="metric">(mIoU &uarr;)</span></th>
+                                    <th><img src="assets/icons/ins_seg.svg" alt="" class="rank-matrix-icon">Inst. Seg.*<span class="metric">(mAP &uarr;)</span></th>
+                                    <th><img src="assets/icons/species_cls.svg" alt="" class="rank-matrix-icon">Species Cls.<span class="metric">(allAcc &uarr;)</span></th>
+                                    <th><img src="assets/icons/age_regress.svg" alt="" class="rank-matrix-icon">Age Reg.<span class="metric">(RMSE &darr;)</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="rank-matrix-ylabel" rowspan="5"><span>Source (pretrained) model</span></td>
+                                    <td class="source-name">SSL</td>
+                                    <td class="cell" style="background:#2dd4bf; color:#062825;">84.2</td>
+                                    <td class="cell" style="background:#2dd4bf; color:#062825;">38.7</td>
+                                    <td class="cell" style="background:#2dd4bf; color:#062825;">72.8</td>
+                                    <td class="cell" style="background:#2dd4bf; color:#062825;">29.1</td>
+                                </tr>
+                                <tr>
+                                    <td class="source-name">Sem. Seg.</td>
+                                    <td class="blank">&mdash;</td>
+                                    <td class="blank">&mdash;</td>
+                                    <td class="cell" style="background:#0c3a35; color:#fff;">68.8</td>
+                                    <td class="cell" style="background:#0c3a35; color:#fff;">30.9</td>
+                                </tr>
+                                <tr>
+                                    <td class="source-name">Inst. Seg.</td>
+                                    <td class="blank">&mdash;</td>
+                                    <td class="blank">&mdash;</td>
+                                    <td class="cell" style="background:#146b62; color:#fff;">70.1</td>
+                                    <td class="cell" style="background:#1f9a8c; color:#fff;">30.6</td>
+                                </tr>
+                                <tr>
+                                    <td class="source-name">Species Cls.</td>
+                                    <td class="cell" style="background:#1f9a8c; color:#fff;">82.2</td>
+                                    <td class="cell" style="background:#146b62; color:#fff;">22.4</td>
+                                    <td class="blank">&mdash;</td>
+                                    <td class="cell" style="background:#146b62; color:#fff;">30.8</td>
+                                </tr>
+                                <tr>
+                                    <td class="source-name">Age Reg.</td>
+                                    <td class="cell" style="background:#146b62; color:#fff;">79.5</td>
+                                    <td class="cell" style="background:#1f9a8c; color:#fff;">24.6</td>
+                                    <td class="cell" style="background:#1f9a8c; color:#fff;">70.9</td>
+                                    <td class="blank">&mdash;</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <div class="rank-legend">
+                            <span>Within-column rank:</span>
+                            <div class="rank-legend-swatches">
+                                <span style="background:#2dd4bf;"></span>
+                                <span style="background:#1f9a8c;"></span>
+                                <span style="background:#146b62;"></span>
+                                <span style="background:#0c3a35;"></span>
+                            </div>
+                            <span>1 (best) &rarr; 4 (worst)</span>
+                        </div>
+                        <div class="results-table-footnote">
+                            Values are the raw metric at the full (100%) label budget. Blank cells are in-domain
+                            pairs (a source probed on its own pretraining task) or the semantic/instance
+                            segmentation pair, which share a backbone and are not an independent transfer test.
+                            * Instance segmentation is probed with a task head rather than a linear layer.
+                        </div>
+                    </div>
+
+                    <div class="viz-card" style="margin: 20px auto 0;">
+                        <div class="viz-card-title" style="color: #2dd4bf;">Data efficiency of frozen transfer</div>
+                        <div class="viz-card-subtitle">
+                            Self-supervised representations provide more consistent transfer than task-specific pretraining
+                            across diverse downstream objectives and annotation budgets, supporting their use as a 
+                            <span style="font-weight: 700;">general-purpose initialization</span>for forest understanding tasks.
+                        </div>
+
+                        <div id="xfer-shared-legend" style="margin-bottom: 10px;"></div>
+
+                        <div class="xfer-grid">
+                            <div>
+                                <div class="xfer-panel-title">
+                                    <img src="assets/icons/sem_seg.svg" alt="" class="xfer-panel-icon">Semantic segmentation
+                                </div>
+                                <div class="viz-chart" data-chart-id="xfer-sem-seg"></div>
+                            </div>
+                            <div>
+                                <div class="xfer-panel-title">
+                                    <img src="assets/icons/ins_seg.svg" alt="" class="xfer-panel-icon">Instance segmentation
+                                </div>
+                                <div class="viz-chart" data-chart-id="xfer-ins-seg"></div>
+                            </div>
+                            <div>
+                                <div class="xfer-panel-title">
+                                    <img src="assets/icons/species_cls.svg" alt="" class="xfer-panel-icon">Species classification
+                                </div>
+                                <div class="viz-chart" data-chart-id="xfer-species-cls"></div>
+                            </div>
+                            <div>
+                                <div class="xfer-panel-title">
+                                    <img src="assets/icons/age_regress.svg" alt="" class="xfer-panel-icon">Age regression
+                                </div>
+                                <div class="viz-chart" data-chart-id="xfer-age-reg"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="x-small-header">Citation</div>
+            <div class="bibtex-entry">
+                <div class="line">
+                    <span class="value">@article{yue2026forpt,</span>
+                </div>
+                <div class="line">
+                    <span class="key">    title={</span>
+                    <span class="value">Toward a foundation model for forest point clouds},</span>
+                </div>
+                <div class="line">
+                    <span class="key">    author={</span>
+                    <span class="value">Yue, Yuanwen and Puliti, Stefano and Robert, Damien and Topalo{\u{g}}lu, Atakan and Xiang, Binbin and Wielgosz, Maciej and Wegner, Jan Dirk and Astrup, Rasmus and Rupprecht, Christian and Schindler, Konrad},</span>
+                </div>
+                <div class="line">
+                    <span class="key">    journal={</span>
+                    <span class="value">arXiv preprint arXiv:2609.24787},</span>
+                </div>
+                <div class="line">
+                    <span class="key">    year={</span>
+                    <span class="value">2026}</span>
+                </div>
+                <div class="line">}</div>
+            </div>
+
+            <div class="x-small-header">Acknowledgments</div>
+            <p class="x-note">
+                Part of the compute is supported by the Swiss AI Initiative under projects a0182 and a144 on the Alps supercomputer. 
+
+                The project is supported by the Circular Bio-based Europe Joint Undertaking (CBE JU) and its members under Grant Agreement No 101157488 (SingleTree). This project is also funded by the EU Horizon Europe program under Grant Agreement No 101213369 (DVPS) and Grant Agreement No 101131841 (Embed2Scale). Additional funding for Embed2Scale has been provided by the Swiss State Secretariat for Education, Research and Innovation (SERI) and UK Research and Innovation (UKRI).
+
+                Funded by the European Union. Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union or CBE JU. Neither the European Union nor the CBE JU can be held responsible for them.
+            </p>
+
+            <div id="funding-logos" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px 32px; margin: 24px 16px 0;">
+                <img src="assets/logo/singletree.svg" alt="SingleTree" style="height: 56px; width: auto;">
+                <img src="assets/logo/CBE_JU_white.svg" alt="Circular Bio-based Europe Joint Undertaking (CBE JU)" style="height: 44px; width: auto;">
+                <img src="assets/logo/bio_based_industries_consortium_white.svg" alt="Bio-based Industries Consortium" style="height: 44px; width: auto;">
+                <img src="assets/logo/EU_trim.svg" alt="Co-funded by the European Union" style="height: 44px; width: auto;">
+            </div>
+
+        </div>
+
+        <!-- Scroll Down Indicator -->
+        <div id="scroll-indicator" class="scroll-indicator">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 13l5 5 5-5"/>
+            </svg>
+        </div>
+
+    </body>
+</html>
