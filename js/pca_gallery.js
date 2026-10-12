@@ -44,10 +44,10 @@ function pca_carousel_item_template(item) {
         button = `<div class="x-button" style="position: absolute; top: 10px; right: 10px" onclick=\'openWindow(pca_window_template(${JSON.stringify(item)}))\'>View GLB</div>`;
     }
 
-    return `<div class="x-card" style="height: 70vh")\'>
+    return `<div class="x-card" style="height: 70vh;">
                 ${button}
-                <div style="max-width: 100%; max-height: 100%; aspect-ratio: 1; pointer-events: none;">
-                    <video autoplay playsinline loop muted style="position: relative; height: 100%; z-index: -1; transform: scale(${item.video_scale}) translateY(${item.video_offset_y}px)" src="assets/pca_videos/${item.video}"></video>
+                <div style="width: auto; height: 100%; max-width: 100%; aspect-ratio: 1; pointer-events: none;">
+                    <video autoplay playsinline loop muted style="position: relative; width: 100%; height: 100%; z-index: -1; transform: scale(${item.video_scale}) translateY(${item.video_offset_y}px)" src="assets/pca_videos/${item.video}"></video>
                 </div>
             </div>`;
 }
